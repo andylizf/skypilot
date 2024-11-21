@@ -22,7 +22,7 @@ def train() -> None:
     wandb_run_name = os.environ.get("FLYTE_INTERNAL_EXECUTION_ID", "local")
     os.environ["WANDB_RUN_ID"] = wandb_run_name
 
-    hf_auth_token = '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'
+    hf_auth_token = 'xxx'
 
     sky_llama.train.train(hf_auth_token)
 
