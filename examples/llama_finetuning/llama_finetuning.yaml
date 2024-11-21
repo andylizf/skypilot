@@ -1,0 +1,40 @@
+name: llama_finetuning
+edges:
+  - source: create_dataset
+    target: train
+    data:
+      source_path: sky_llama/data
+      target_path: sky_llama/dataset
+      size_gb: 10
+
+---
+name: create_dataset
+
+resources:
+  cpus: 2+
+  memory: 8+
+
+workdir: ./examples/llama_finetuning
+
+setup: |
+  pip install gitpython
+
+run: |
+  python -m sky_llama.workflows create_dataset
+
+---
+name: train
+
+resources:
+  cpus: 16+
+  memory: 36+
+  accelerators: L4:2
+
+workdir: ./examples/llama_finetuning
+
+setup: |
+  pip install -r requirements.txt
+
+run: |
+  ls sky_llama/dataset
+  python -m sky_llama.workflows train

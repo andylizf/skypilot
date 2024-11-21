@@ -1,0 +1,16 @@
+accelerate
+bitsandbytes
+datasets
+deepspeed==0.10.0
+gitpython
+huggingface_hub
+mwparserfromhell
+peft
+pandera
+pyyaml
+sentencepiece
+tokenizers
+transformers
+torch==2.0.1
+wandb
+dataclasses-json
