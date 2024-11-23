@@ -4,6 +4,7 @@ This dataset should contain documents from the Flyte repositories for language
 model fine-tuning.
 """
 
+import time
 import itertools
 import os
 import json
@@ -87,26 +88,48 @@ def create_dataset(
     repo_cache_dir: Path,
     **kwargs,
 ):
-    for url in urls:
-        print("processing url:", url)
-        for file, repo_name, repo_filepath, github_url in iter_github_documents(
-                url, repo_cache_dir, **kwargs,
-            ):
-            file_name = get_file_name(repo_filepath)
-            out_path = os.path.join(output_dir, repo_name, file_name)
-            os.makedirs(os.path.dirname(out_path), exist_ok=True)
+    """Create dataset with local temporary directory first."""
+    import tempfile
 
-            metadata_dir = os.path.join(output_dir, "metadata", repo_name)
-            os.makedirs(metadata_dir, exist_ok=True)
-            metadata_file = os.path.join(metadata_dir, f"{file_name}.metadata.json")
+    # !Edit for SkyPilot: Here we use a temporary directory to store the dataset.
+    # Since mounted gcp bucket seems not so stable, we use this method to avoid
+    # failed syscalls.
+    with tempfile.TemporaryDirectory() as temp_dir:
+        temp_output = Path(os.path.join(temp_dir, 'output'))
+        temp_cache = Path(os.path.join(temp_dir, 'cache'))
+        
+        print(f"Using temporary directories: \noutput: {temp_output}\ncache: {temp_cache}")
+        
+        for url in urls:
+            print(f"Processing url: {url}")
+            for file, repo_name, repo_filepath, github_url in iter_github_documents(
+                    url, temp_cache, **kwargs,
+                ):
+                file_name = get_file_name(repo_filepath)
+                out_path = os.path.join(temp_output, repo_name, file_name)
+                os.makedirs(os.path.dirname(out_path), exist_ok=True)
 
-            print(f"writing file: {out_path}")
-            shutil.copy(file, out_path)
+                metadata_dir = os.path.join(temp_output, "metadata", repo_name)
+                os.makedirs(metadata_dir, exist_ok=True)
+                metadata_file = os.path.join(metadata_dir, f"{file_name}.metadata.json")
 
-            metadata = {
-                "github_url": github_url,
-            }
-            with open(metadata_file, "w") as f:
-                json.dump(metadata, f)
+                print(f"Writing file: {out_path}")
+                shutil.copy(file, out_path)
 
-    print(f"created dataset at: {output_dir}")
+                metadata = {
+                    "github_url": github_url,
+                }
+                with open(metadata_file, "w") as f:
+                    json.dump(metadata, f)
+        
+        print(f"Processing complete, copying to final destination: {output_dir}")
+        
+        os.makedirs(output_dir, exist_ok=True)
+        
+        rsync_cmd = f'rsync -av {temp_output}/ {output_dir}/'
+        ret = os.system(rsync_cmd)
+        
+        if ret != 0:
+            raise RuntimeError(f"Failed to copy files to final destination. rsync returned {ret}")
+            
+        print(f"Dataset created successfully at: {output_dir}")
