@@ -1,0 +1,43 @@
+name: llama_finetuning
+edges:
+  - source: create_dataset
+    target: train
+    data:
+      source_path: /mnt/data
+      target_path: sky_llama/dataset
+      size_gb: 10
+
+---
+name: create_dataset
+
+resources:
+  cpus: 2+
+  memory: 8+
+  use_spot: true
+
+workdir: ./examples/llama_finetuning
+
+setup: |
+  pip install -r requirements.txt
+
+run: |
+  python -m sky_llama.workflows create_dataset
+
+---
+name: train
+
+resources:
+  cpus: 16+
+  memory: 36+
+  accelerators: L4:2
+  image_id: docker:ghcr.io/unionai-oss/flyte-llama-qlora:latest
+  use_spot: true
+
+workdir: ./examples/llama_finetuning
+
+setup: |
+  pip install -r requirements.txt
+
+run: |
+  ls sky_llama/dataset/dataset
+  torchrun --nproc-per-node 2 -m sky_llama.workflows train

@@ -1,0 +1,16 @@
+name: train
+
+resources:
+  cpus: 1+
+  memory: 12+
+  accelerators: A100
+  use_spot: true
+
+workdir: ./examples/llama_finetuning
+
+setup: |
+  pip install -r requirements.txt
+
+run: |
+  ls sky_llama/dataset/dataset
+  python -m sky_llama.workflows train

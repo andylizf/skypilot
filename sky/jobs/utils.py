@@ -728,6 +728,8 @@ def set_storage_mounts_for_data_transfer(dag: 'dag_lib.Dag') -> 'dag_lib.Dag':
                 bucket_name_tmp, max_length=63)
             storage_type, region = best_storage
             new_storage = storage_lib.Storage(name=bucket_name)
+            # (mode=storage_lib.StorageMode.COPY,
+            #                                   source=f's3://{bucket_name}',)
             new_storage.add_store(storage_type, region)
             new_storage_mounts_src = {data.source_path: new_storage}
             src.update_storage_mounts(new_storage_mounts_src)

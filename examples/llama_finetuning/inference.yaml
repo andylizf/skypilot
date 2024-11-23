@@ -1,0 +1,20 @@
+name: inference
+
+resources:
+  cpus: 8+
+  memory: 30+
+  accelerators: A100
+  use_spot: true
+
+workdir: ./examples/llama_finetuning
+
+setup: |
+  pip install -r requirements.txt
+
+run: |
+  echo "Testing the data"
+  mkdir -p sky_llama/input
+  ls sky_llama
+  ls sky_llama/input
+  python -m sky_llama.workflows generate_answers
+  ls /tmp/issue_answers

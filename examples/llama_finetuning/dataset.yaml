@@ -3,9 +3,27 @@ edges:
   - source: create_dataset
     target: train
     data:
-      source_path: /mnt/data
+      source_path: sky_llama/data
       target_path: sky_llama/dataset
-      size_gb: 10
+      size_gb: 1
+  - source: train
+    target: inference
+    data:
+      source_path: sky_llama/output
+      target_path: sky_llama/model
+      size_gb: 1
+  - source: fetch_dataset
+    target: filter_data
+    data:
+      source_path: sky_llama/data
+      target_path: sky_llama/input
+      size_gb: 1
+  - source: filter_data
+    target: inference
+    data:
+      source_path: sky_llama/filtered_issues
+      target_path: sky_llama/input
+      size_gb: 1
 
 ---
 name: create_dataset
@@ -13,6 +31,7 @@ name: create_dataset
 resources:
   cpus: 2+
   memory: 8+
+  # use_spot: true
 
 workdir: ./examples/llama_finetuning
 
@@ -21,14 +40,16 @@ setup: |
 
 run: |
   python -m sky_llama.workflows create_dataset
+  ls -l sky_llama/data/dataset
 
 ---
 name: train
 
 resources:
-  cpus: 16+
-  memory: 36+
-  accelerators: L4:2
+  cpus: 1+
+  memory: 12+
+  accelerators: {A100, A100-80GB, A100-80GB-SXM}
+  # use_spot: true
 
 workdir: ./examples/llama_finetuning
 
@@ -36,5 +57,60 @@ setup: |
   pip install -r requirements.txt
 
 run: |
-  ls sky_llama/dataset
+  ls sky_llama/dataset/dataset
   python -m sky_llama.workflows train
+
+---
+name: fetch_dataset
+
+resources:
+  cpus: 2+
+  memory: 8+
+  # use_spot: true
+
+workdir: ./examples/llama_finetuning
+
+setup: |
+  pip install -r requirements.txt
+
+run: |
+  python -m sky_llama.workflows fetch_github_data
+
+---
+name: filter_data
+
+resources:
+  cpus: 8+
+  memory: 30+
+  accelerators: {A100, A100-80GB, A100-80GB-SXM}
+  # use_spot: true
+
+workdir: ./examples/llama_finetuning
+
+setup: |
+  pip install -r requirements.txt
+
+run: |
+  python -m sky_llama.workflows filter_issues
+
+---
+name: inference
+
+resources:
+  cpus: 8+
+  memory: 30+
+  accelerators: {A100, A100-80GB, A100-80GB-SXM}
+  # use_spot: true
+
+workdir: ./examples/llama_finetuning
+
+setup: |
+  pip install -r requirements.txt
+
+run: |
+  echo "Testing the data"
+  ls sky_llama
+  ls sky_llama/input
+  python -m sky_llama.workflows generate_answers
+  ls /tmp/issue_answers
+

@@ -1,0 +1,59 @@
+edges: 
+  - source: fetch_dataset
+    target: filter_data
+    data:
+      source_path: sky_llama/data
+      target_path: sky_llama/input
+      size_gb: 10
+  - source: filter_data
+    target: test
+    data:
+      source_path: sky_llama/filtered_issues
+      target_path: sky_llama/input
+      size_gb: 10
+
+---
+name: fetch_dataset
+
+resources:
+  cpus: 2+
+  memory: 8+
+  use_spot: true
+
+workdir: ./examples/llama_finetuning
+
+setup: |
+  pip install -r requirements.txt
+
+run: |
+  python -m sky_llama.workflows fetch_github_data
+
+---
+name: filter_data
+
+resources:
+  cpus: 8+
+  memory: 30+
+  accelerators: L4
+  use_spot: true
+
+workdir: ./examples/llama_finetuning
+
+setup: |
+  pip install -r requirements.txt
+
+run: |
+  python -m sky_llama.workflows filter_issues
+
+---
+name: test
+
+resources:
+  cpus: 2+
+  use_spot: true
+
+run: |
+  echo "Testing the data"
+  ls sky_llama
+  ls sky_llama/input
+  sleep 100

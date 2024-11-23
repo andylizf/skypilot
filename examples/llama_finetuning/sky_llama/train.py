@@ -1,32 +1,30 @@
 """Train Flyte Llama."""
 
+from dataclasses import asdict
+from dataclasses import dataclass
+from dataclasses import field
 import json
 import math
 import os
-from dataclasses import dataclass, field, asdict
 from pathlib import Path
 from typing import List, Optional
 
-import torch
-from dataclasses_json import dataclass_json, DataClassJsonMixin
-
-import transformers
-from peft import (
-    LoraConfig,
-    get_peft_model,
-    prepare_model_for_kbit_training,
-)
-from transformers import (
-    AutoTokenizer,
-    AutoModelForCausalLM,
-    BitsAndBytesConfig,
-    DataCollatorForLanguageModeling,
-    Trainer,
-    TrainingArguments,
-)
-
+from dataclasses_json import dataclass_json
+from dataclasses_json import DataClassJsonMixin
+from peft import get_peft_model
+from peft import LoraConfig
+from peft import prepare_model_for_kbit_training
 from sky_llama.dataloader import get_dataset
-
+import torch
+from torch.distributed import init_process_group
+from torch.nn.parallel import DistributedDataParallel as DDP
+import transformers
+from transformers import AutoModelForCausalLM
+from transformers import AutoTokenizer
+from transformers import BitsAndBytesConfig
+from transformers import DataCollatorForLanguageModeling
+from transformers import Trainer
+from transformers import TrainingArguments
 
 transformers.logging.set_verbosity_debug()
 
@@ -47,9 +45,9 @@ class PublishConfig(DataClassJsonMixin):
 
 @dataclass
 class TrainerConfig(DataClassJsonMixin):
-    model_path: str = "codellama/CodeLlama-7b-hf"
-    data_dir: str = "./dataset"
-    output_dir: str = "./output"
+    model_path: str = "meta-llama/Llama-3.1-8B-Instruct"
+    data_dir: str = "./sky_llama/dataset"
+    output_dir: str = "./sky_llama/output"
     checkpoint_dir: Optional[str] = None
     num_epochs: int = 20
     max_steps: int = -1
@@ -67,7 +65,8 @@ class TrainerConfig(DataClassJsonMixin):
     use_qlora: bool = False
     lora_r: int = 8
     lora_alpha: int = 16
-    lora_target_modules: List[str] = field(default_factory=lambda: ["q_proj", "k_proj"])
+    lora_target_modules: List[str] = field(
+        default_factory=lambda: ["q_proj", "k_proj"])
     lora_dropout: float = 0.05
     debug: bool = False
     publish_config: Optional[PublishConfig] = field(default=None)
@@ -75,19 +74,19 @@ class TrainerConfig(DataClassJsonMixin):
 
 def trainer_config() -> TrainerConfig:
     trainer_config = TrainerConfig(
-        output_dir="./output",
-        checkpoint_dir=None,
-        num_epochs=1,
-        max_steps=3,
-        test_size=0.001,
-        report_to="wandb",
-        device_map="auto",
-        dataloader_num_proc=8,
-        use_fp16=True,
-        use_4bit=True,
-        use_qlora=True,
-        padding="left",
-        lora_target_modules=["q_proj", "v_proj"]
+        checkpoint_dir=None,  # Directory to resume from a checkpoint
+        num_epochs=4,  # Increased to allow more training epochs
+        test_size=0.001,  # Increased test size for more robust evaluation
+        report_to="wandb",  # Logging with Weights & Biases
+        dataloader_num_proc=8,  # Reduced to 4 to avoid CPU contention
+        use_fp16=True,  # Enable mixed precision (16-bit floating-point)
+        use_4bit=True,  # Enable 4-bit precision
+        use_qlora=True,  # Enable QLoRA for fine-tuning
+        padding="left",  # Padding strategy (left padding for LLaMA)
+        lora_target_modules=["q_proj", "v_proj"
+                            ],  # Modules to target for LoRA fine-tuning
+        batch_size=4,  # Added batch size for per-device training
+        device_map="auto",  # Load model on the current device
     )
     return trainer_config
 
@@ -104,13 +103,19 @@ def train(
         config.model_path,
         model_max_length=config.model_max_length,
         padding_side=config.padding,
+        use_auth_token=hf_auth_token,
     )
     tokenizer.pad_token = tokenizer.eos_token
 
     if torch.cuda.is_available():
         dtype = torch.bfloat16
+        # local_rank = int(os.environ["LOCAL_RANK"])
+        # torch.cuda.set_device(local_rank)
+        # print(f"Process {local_rank} using device {torch.cuda.current_device()}")
     else:
         dtype = torch.float32
+
+    # init_process_group(backend="nccl", init_method="env://")
 
     # load pre-trained model
     load_model_params = {
@@ -132,14 +137,13 @@ def train(
                 bnb_4bit_quant_type="nf4",
                 bnb_4bit_compute_dtype=dtype,
             ),
-            "load_in_4bit": True,
         }
-        
 
     model = AutoModelForCausalLM.from_pretrained(
         config.model_path,
         **load_model_params,
     )
+    # model = model.to(local_rank)
 
     optim = "adamw_torch"
     if config.use_qlora:
@@ -147,26 +151,15 @@ def train(
         model.gradient_checkpointing_enable()
         model = prepare_model_for_kbit_training(model)
 
-        if pretrained_adapter is not None:
-            lora_config = LoraConfig.from_pretrained(pretrained_adapter)
-            lora_config.inference_mode = False
-            model = get_peft_model(model, lora_config)
-            model.load_adapter(
-                pretrained_adapter,
-                adapter_name="default",
-                is_trainable=True,
-            )
-            model.set_adapter("default")
-        else:
-            lora_config = LoraConfig(
-                r=config.lora_r,
-                lora_alpha=config.lora_alpha,
-                target_modules=config.lora_target_modules,
-                lora_dropout=config.lora_dropout,
-                bias="none",
-                task_type="CAUSAL_LM",
-            )
-            model = get_peft_model(model, lora_config)
+        lora_config = LoraConfig(
+            r=config.lora_r,
+            lora_alpha=config.lora_alpha,
+            target_modules=config.lora_target_modules,
+            lora_dropout=config.lora_dropout,
+            bias="none",
+            task_type="CAUSAL_LM",
+        )
+        model = get_peft_model(model, lora_config)
 
         print("LORA Config:")
         print(lora_config)
@@ -174,30 +167,37 @@ def train(
 
     def tokenize(examples):
         tokens = tokenizer(
-            # add eos token to each example
-            [f"{t}{tokenizer.eos_token}" for t in examples['text']]
+            [f"{t}{tokenizer.eos_token}" for t in examples['text']],
+            padding=True,
+            truncation=True,
+            max_length=tokenizer.model_max_length,
+            return_tensors=None,
         )
         return tokens
 
     limit = 5 if config.debug else None
-    dataset = (
-        get_dataset(
-            Path(config.data_dir).expanduser(),
-            num_proc=config.dataloader_num_proc,
-            limit=limit,
-            block_size=config.model_max_length,
-            skip_by=config.model_max_length,
-        )
-        .map(tokenize, batched=True, num_proc=config.dataloader_num_proc)
-    )
+    dataset = (get_dataset(
+        Path(config.data_dir).expanduser(),
+        num_proc=config.dataloader_num_proc,
+        limit=limit,
+        block_size=config.model_max_length,
+        skip_by=config.model_max_length,
+    ).map(tokenize, batched=True, num_proc=config.dataloader_num_proc))
+
+    # Remove unnecessary columns
+    columns_to_remove = [
+        col for col in dataset.column_names
+        if col not in ["input_ids", "attention_mask", "labels"]
+    ]
+    dataset = dataset.remove_columns(columns_to_remove)
 
     print(f"Dataset size: {len(dataset)}")
-    dataset_splits = dataset.train_test_split(
-        test_size=config.test_size, seed=config.seed
-    )
+    dataset_splits = dataset.train_test_split(test_size=config.test_size,
+                                              seed=config.seed)
 
     tokenizer.deprecation_warnings["Asking-to-pad-a-fast-tokenizer"] = True
-    data_collator = DataCollatorForLanguageModeling(tokenizer=tokenizer, mlm=False)
+    data_collator = DataCollatorForLanguageModeling(tokenizer=tokenizer,
+                                                    mlm=False)
 
     training_args = TrainingArguments(
         output_dir=config.output_dir,
@@ -221,6 +221,7 @@ def train(
         save_strategy="steps",
         save_steps=500,
         save_total_limit=1,
+        remove_unused_columns=False,
     )
 
     trainer = Trainer(
@@ -230,7 +231,32 @@ def train(
         eval_dataset=dataset_splits["test"],
         data_collator=data_collator,
     )
-    trainer.train(resume_from_checkpoint=config.checkpoint_dir)
+
+    def get_latest_checkpoint(checkpoints_dir) -> Optional[str]:
+        # Ensure the directory exists
+        if not os.path.exists(checkpoints_dir):
+            return None
+
+        # List all subdirectories that match the checkpoint naming pattern
+        subdirs = [
+            os.path.join(checkpoints_dir, d)
+            for d in os.listdir(checkpoints_dir)
+            if os.path.isdir(os.path.join(checkpoints_dir, d)) and
+            d.startswith("checkpoint-")
+        ]
+
+        if not subdirs:
+            return None
+
+        # Sort directories by modification time (most recent first)
+        latest_checkpoint = max(subdirs, key=os.path.getmtime)
+
+        return latest_checkpoint
+
+    checkpoint_dir = get_latest_checkpoint(config.output_dir)
+    if checkpoint_dir:
+        print(f"Resuming from checkpoint: {checkpoint_dir}")
+    trainer.train(resume_from_checkpoint=checkpoint_dir)
     eval_results = trainer.evaluate(eval_dataset=dataset_splits["test"])
     print(f"Perplexity: {math.exp(eval_results['eval_loss']):.2f}")
     trainer.save_model(training_args.output_dir)

@@ -1,0 +1,91 @@
+Best plan: 
+-------------------------------------------------------------------------------------------------------------------------------
+ TASK                                   #NODES   CLOUD    INSTANCE              vCPUs   Mem(GB)   ACCELERATORS   REGION/ZONE   
+-------------------------------------------------------------------------------------------------------------------------------
+ create_dataset                         1        AWS      m6i.large             2       8         -              us-east-2     
+ fetch_dataset                          1        AWS      m6i.large             2       8         -              us-east-2     
+ create_dataset_to_train_storage        1        AWS      m6i.2xlarge           8       32        -              us-east-1     
+ fetch_dataset_to_filter_data_storage   1        AWS      m6i.2xlarge           8       32        -              us-east-1     
+ train                                  1        RunPod   1x_A100-80GB_SECURE   8       80        A100-80GB:1    CZ            
+ filter_data                            1        RunPod   1x_A100-80GB_SECURE   8       80        A100-80GB:1    IS            
+ train_to_inference_storage             1        AWS      m6i.2xlarge           8       32        -              us-east-1     
+ filter_data_to_inference_storage       1        AWS      m6i.2xlarge           8       32        -              us-east-2     
+ inference                              1        RunPod   1x_A100-80GB_SECURE   8       80        A100-80GB:1    SE            
+-------------------------------------------------------------------------------------------------------------------------------
+
+Considered resources for task 'create_dataset' (1 node):
+----------------------------------------------------------------------------------------------------
+ CLOUD    INSTANCE             vCPUs   Mem(GB)   ACCELERATORS   REGION/ZONE     COST ($)   CHOSEN   
+----------------------------------------------------------------------------------------------------
+ GCP      n2-standard-2        2       8         -              us-central1-a   0.10                
+ AWS      m6i.large            2       8         -              us-east-2       0.10          ✔     
+ RunPod   1x_RTXA4000_SECURE   6       16        RTXA4000:1     CA              0.34                
+----------------------------------------------------------------------------------------------------
+
+Considered resources for task 'fetch_dataset' (1 node):
+----------------------------------------------------------------------------------------------------
+ CLOUD    INSTANCE             vCPUs   Mem(GB)   ACCELERATORS   REGION/ZONE     COST ($)   CHOSEN   
+----------------------------------------------------------------------------------------------------
+ GCP      n2-standard-2        2       8         -              us-central1-a   0.10                
+ AWS      m6i.large            2       8         -              us-east-2       0.10          ✔     
+ RunPod   1x_RTXA4000_SECURE   6       16        RTXA4000:1     CA              0.34                
+----------------------------------------------------------------------------------------------------
+
+Considered resources for task 'create_dataset_to_train_storage' (1 node):
+----------------------------------------------------------------------------------------------
+ CLOUD   INSTANCE        vCPUs   Mem(GB)   ACCELERATORS   REGION/ZONE     COST ($)   CHOSEN   
+----------------------------------------------------------------------------------------------
+ AWS     m6i.2xlarge     8       32        -              us-east-1       0.00          ✔     
+ GCP     n2-standard-8   8       32        -              us-central1-a   0.00                
+----------------------------------------------------------------------------------------------
+
+Considered resources for task 'fetch_dataset_to_filter_data_storage' (1 node):
+----------------------------------------------------------------------------------------------
+ CLOUD   INSTANCE        vCPUs   Mem(GB)   ACCELERATORS   REGION/ZONE     COST ($)   CHOSEN   
+----------------------------------------------------------------------------------------------
+ GCP     n2-standard-8   8       32        -              us-central1-a   0.00                
+ AWS     m6i.2xlarge     8       32        -              us-east-1       0.00          ✔     
+----------------------------------------------------------------------------------------------
+
+Considered resources for task 'train' (1 node):
+------------------------------------------------------------------------------------------------------------
+ CLOUD    INSTANCE                  vCPUs   Mem(GB)   ACCELERATORS      REGION/ZONE     COST ($)   CHOSEN   
+------------------------------------------------------------------------------------------------------------
+ RunPod   1x_A100-80GB_SECURE       8       80        A100-80GB:1       CZ              1.99          ✔     
+ RunPod   1x_A100-80GB-SXM_SECURE   16      80        A100-80GB-SXM:1   CA              2.29                
+ GCP      a2-ultragpu-1g            12      170       A100-80GB:1       us-central1-a   5.03                
+------------------------------------------------------------------------------------------------------------
+
+Considered resources for task 'filter_data' (1 node):
+------------------------------------------------------------------------------------------------------------
+ CLOUD    INSTANCE                  vCPUs   Mem(GB)   ACCELERATORS      REGION/ZONE     COST ($)   CHOSEN   
+------------------------------------------------------------------------------------------------------------
+ RunPod   1x_A100-80GB_SECURE       8       80        A100-80GB:1       IS              1.99          ✔     
+ RunPod   1x_A100-80GB-SXM_SECURE   16      80        A100-80GB-SXM:1   CA              2.29                
+ GCP      a2-ultragpu-1g            12      170       A100-80GB:1       us-central1-a   5.03                
+------------------------------------------------------------------------------------------------------------
+
+Considered resources for task 'train_to_inference_storage' (1 node):
+----------------------------------------------------------------------------------------------
+ CLOUD   INSTANCE        vCPUs   Mem(GB)   ACCELERATORS   REGION/ZONE     COST ($)   CHOSEN   
+----------------------------------------------------------------------------------------------
+ GCP     n2-standard-8   8       32        -              us-central1-a   0.00                
+ AWS     m6i.2xlarge     8       32        -              us-east-1       0.00          ✔     
+----------------------------------------------------------------------------------------------
+
+Considered resources for task 'filter_data_to_inference_storage' (1 node):
+----------------------------------------------------------------------------------------------
+ CLOUD   INSTANCE        vCPUs   Mem(GB)   ACCELERATORS   REGION/ZONE     COST ($)   CHOSEN   
+----------------------------------------------------------------------------------------------
+ AWS     m6i.2xlarge     8       32        -              us-east-2       0.00          ✔     
+ GCP     n2-standard-8   8       32        -              us-central1-a   0.00                
+----------------------------------------------------------------------------------------------
+
+Considered resources for task 'inference' (1 node):
+------------------------------------------------------------------------------------------------------------
+ CLOUD    INSTANCE                  vCPUs   Mem(GB)   ACCELERATORS      REGION/ZONE     COST ($)   CHOSEN   
+------------------------------------------------------------------------------------------------------------
+ RunPod   1x_A100-80GB_SECURE       8       80        A100-80GB:1       SE              1.99          ✔     
+ RunPod   1x_A100-80GB-SXM_SECURE   16      80        A100-80GB-SXM:1   CA              2.29                
+ GCP      a2-ultragpu-1g            12      170       A100-80GB:1       us-central1-a   5.03                
+------------------------------------------------------------------------------------------------------------
