@@ -114,8 +114,12 @@ def train(
 
     if torch.cuda.is_available():
         dtype = torch.bfloat16
+        local_rank = int(os.environ["LOCAL_RANK"])
+        torch.cuda.set_device(local_rank)
     else:
         dtype = torch.float32
+    
+    init_process_group(backend="nccl", init_method="env://")
 
     # load pre-trained model
     load_model_params = {
@@ -144,6 +148,7 @@ def train(
         config.model_path,
         **load_model_params,
     )
+    model = model.to(local_rank)
 
     optim = "adamw_torch"
     if config.use_qlora:
