@@ -25,8 +25,8 @@ DEFAULT_INCLUDE_FILES = [
 ROOT_URL = "https://github.com/"
 REPO_URLS = [
     f"{ROOT_URL}cblmemo/skycamp24-tutorial",
-    f"{ROOT_URL}skypilot-org/skypilot",
-    f"{ROOT_URL}skypilot-org/skypilot-tutorial",
+    # f"{ROOT_URL}skypilot-org/skypilot",
+    # f"{ROOT_URL}skypilot-org/skypilot-tutorial",
 ]
 
 

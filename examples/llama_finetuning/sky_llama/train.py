@@ -8,6 +8,8 @@ from pathlib import Path
 from typing import List, Optional
 
 import torch
+from torch.distributed import init_process_group
+from torch.nn.parallel import DistributedDataParallel as DDP
 from dataclasses_json import dataclass_json, DataClassJsonMixin
 
 import transformers
@@ -48,8 +50,8 @@ class PublishConfig(DataClassJsonMixin):
 @dataclass
 class TrainerConfig(DataClassJsonMixin):
     model_path: str = "codellama/CodeLlama-7b-hf"
-    data_dir: str = "./dataset"
-    output_dir: str = "./output"
+    data_dir: str = "./sky_llama/dataset"
+    output_dir: str = "./sky_llama/output"
     checkpoint_dir: Optional[str] = None
     num_epochs: int = 20
     max_steps: int = -1
@@ -75,28 +77,30 @@ class TrainerConfig(DataClassJsonMixin):
 
 def trainer_config() -> TrainerConfig:
     trainer_config = TrainerConfig(
-        output_dir="./output",
-        checkpoint_dir=None,
-        num_epochs=1,
-        max_steps=3,
-        test_size=0.001,
-        report_to="wandb",
-        device_map="auto",
-        dataloader_num_proc=8,
-        use_fp16=True,
-        use_4bit=True,
-        use_qlora=True,
-        padding="left",
-        lora_target_modules=["q_proj", "v_proj"]
+        output_dir="./output",               # Directory to save the model and logs
+        checkpoint_dir=None,                 # Directory to resume from a checkpoint
+        num_epochs=3,                        # Increased to allow more training epochs
+        max_steps=100,                       # Increased max steps for better convergence
+        test_size=0.1,                       # Increased test size for more robust evaluation
+        report_to="wandb",                   # Logging with Weights & Biases
+        dataloader_num_proc=4,               # Reduced to 4 to avoid CPU contention
+        use_fp16=True,                       # Enable mixed precision (16-bit floating-point)
+        use_4bit=True,                       # Enable 4-bit precision
+        use_qlora=True,                      # Enable QLoRA for fine-tuning
+        padding="left",                      # Padding strategy (left padding for LLaMA)
+        lora_target_modules=["q_proj", "v_proj"],  # Modules to target for LoRA fine-tuning
+        batch_size=4,                        # Added batch size for per-device training
+        gradient_accumulation_steps=16,      # Accumulate gradients for larger effective batch size
+        device_map={"": torch.cuda.current_device()},  # Load model on the current device
     )
     return trainer_config
-
 
 def train(
     hf_auth_token: Optional[str] = None,
     **kwargs,
 ):
     print("Training model...")
+    # init_process_group(backend="nccl", init_method="env://")
     config = trainer_config()
 
     # load tokenizer
@@ -132,6 +136,7 @@ def train(
                 bnb_4bit_quant_type="nf4",
                 bnb_4bit_compute_dtype=dtype,
             ),
+            "load_in_4bit": True,
         }
         
 
@@ -146,26 +151,15 @@ def train(
         model.gradient_checkpointing_enable()
         model = prepare_model_for_kbit_training(model)
 
-        if pretrained_adapter is not None:
-            lora_config = LoraConfig.from_pretrained(pretrained_adapter)
-            lora_config.inference_mode = False
-            model = get_peft_model(model, lora_config)
-            model.load_adapter(
-                pretrained_adapter,
-                adapter_name="default",
-                is_trainable=True,
-            )
-            model.set_adapter("default")
-        else:
-            lora_config = LoraConfig(
-                r=config.lora_r,
-                lora_alpha=config.lora_alpha,
-                target_modules=config.lora_target_modules,
-                lora_dropout=config.lora_dropout,
-                bias="none",
-                task_type="CAUSAL_LM",
-            )
-            model = get_peft_model(model, lora_config)
+        lora_config = LoraConfig(
+            r=config.lora_r,
+            lora_alpha=config.lora_alpha,
+            target_modules=config.lora_target_modules,
+            lora_dropout=config.lora_dropout,
+            bias="none",
+            task_type="CAUSAL_LM",
+        )
+        model = get_peft_model(model, lora_config)
 
         print("LORA Config:")
         print(lora_config)
@@ -173,8 +167,11 @@ def train(
 
     def tokenize(examples):
         tokens = tokenizer(
-            # add eos token to each example
-            [f"{t}{tokenizer.eos_token}" for t in examples['text']]
+            [f"{t}{tokenizer.eos_token}" for t in examples['text']],
+            padding=True,
+            truncation=True,
+            max_length=tokenizer.model_max_length,
+            return_tensors=None,
         )
         return tokens
 
@@ -189,6 +186,10 @@ def train(
         )
         .map(tokenize, batched=True, num_proc=config.dataloader_num_proc)
     )
+
+    # Remove unnecessary columns
+    columns_to_remove = [col for col in dataset.column_names if col not in ["input_ids", "attention_mask", "labels"]]
+    dataset = dataset.remove_columns(columns_to_remove)
 
     print(f"Dataset size: {len(dataset)}")
     dataset_splits = dataset.train_test_split(
@@ -220,6 +221,7 @@ def train(
         save_strategy="steps",
         save_steps=500,
         save_total_limit=1,
+        remove_unused_columns=False,
     )
 
     trainer = Trainer(

@@ -21,6 +21,7 @@ def train() -> None:
 
     wandb_run_name = os.environ.get("FLYTE_INTERNAL_EXECUTION_ID", "local")
     os.environ["WANDB_RUN_ID"] = wandb_run_name
+    os.environ["WANDB_API_KEY"] = '5238e0a0a01e1ce6b9c8ddf2def51c9e3dade0da'
 
     hf_auth_token = 'xxx'
 
