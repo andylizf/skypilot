@@ -91,7 +91,8 @@ def trainer_config() -> TrainerConfig:
         lora_target_modules=["q_proj", "v_proj"],  # Modules to target for LoRA fine-tuning
         batch_size=4,                        # Added batch size for per-device training
         gradient_accumulation_steps=16,      # Accumulate gradients for larger effective batch size
-        device_map={"": torch.cuda.current_device()},  # Load model on the current device
+        # device_map={"": torch.cuda.current_device()},  # Load model on the current device
+        device_map='auto',                   # Load model on the current device
     )
     return trainer_config
 
@@ -136,7 +137,6 @@ def train(
                 bnb_4bit_quant_type="nf4",
                 bnb_4bit_compute_dtype=dtype,
             ),
-            "load_in_4bit": True,
         }
         
 

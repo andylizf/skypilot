@@ -1,0 +1,18 @@
+
+name: train
+
+resources:
+  cpus: 16+
+  memory: 36+
+  accelerators: L4
+
+workdir: ./examples/llama_finetuning
+
+setup: |
+  pip install -r requirements.txt
+
+run: |
+  mkdir -p sky_llama/dataset/dataset/metadata
+  echo 'Hello World' > sky_llama/dataset/dataset/test.txt
+  ls sky_llama/dataset/dataset
+  python -m sky_llama.workflows train
