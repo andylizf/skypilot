@@ -79,8 +79,8 @@ def trainer_config() -> TrainerConfig:
     trainer_config = TrainerConfig(
         output_dir="./output",               # Directory to save the model and logs
         checkpoint_dir=None,                 # Directory to resume from a checkpoint
-        num_epochs=3,                        # Increased to allow more training epochs
-        max_steps=100,                       # Increased max steps for better convergence
+        # num_epochs=3,                        # Increased to allow more training epochs
+        # max_steps=100,                       # Increased max steps for better convergence
         test_size=0.1,                       # Increased test size for more robust evaluation
         report_to="wandb",                   # Logging with Weights & Biases
         dataloader_num_proc=4,               # Reduced to 4 to avoid CPU contention
@@ -91,8 +91,8 @@ def trainer_config() -> TrainerConfig:
         lora_target_modules=["q_proj", "v_proj"],  # Modules to target for LoRA fine-tuning
         batch_size=4,                        # Added batch size for per-device training
         gradient_accumulation_steps=16,      # Accumulate gradients for larger effective batch size
-        # device_map={"": torch.cuda.current_device()},  # Load model on the current device
-        device_map='auto',                   # Load model on the current device
+        device_map={"": torch.cuda.current_device()},  # Load model on the current device
+        # device_map='auto',                   # Load model on the current device
     )
     return trainer_config
 
@@ -101,7 +101,6 @@ def train(
     **kwargs,
 ):
     print("Training model...")
-    # init_process_group(backend="nccl", init_method="env://")
     config = trainer_config()
 
     # load tokenizer
@@ -114,12 +113,13 @@ def train(
 
     if torch.cuda.is_available():
         dtype = torch.bfloat16
-        local_rank = int(os.environ["LOCAL_RANK"])
-        torch.cuda.set_device(local_rank)
+        # local_rank = int(os.environ["LOCAL_RANK"])
+        # torch.cuda.set_device(local_rank)
+        # print(f"Process {local_rank} using device {torch.cuda.current_device()}")
     else:
         dtype = torch.float32
     
-    init_process_group(backend="nccl", init_method="env://")
+    # init_process_group(backend="nccl", init_method="env://")
 
     # load pre-trained model
     load_model_params = {
@@ -148,7 +148,7 @@ def train(
         config.model_path,
         **load_model_params,
     )
-    model = model.to(local_rank)
+    # model = model.to(local_rank)
 
     optim = "adamw_torch"
     if config.use_qlora:

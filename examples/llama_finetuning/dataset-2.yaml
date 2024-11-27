@@ -29,7 +29,8 @@ name: train
 resources:
   cpus: 16+
   memory: 36+
-  accelerators: L4
+  accelerators: L4:2
+  image_id: docker:ghcr.io/unionai-oss/flyte-llama-qlora:latest
   use_spot: true
 
 workdir: ./examples/llama_finetuning
@@ -39,4 +40,4 @@ setup: |
 
 run: |
   ls sky_llama/dataset/dataset
-  python -m sky_llama.workflows train
+  torchrun --nproc-per-node 2 -m sky_llama.workflows train
