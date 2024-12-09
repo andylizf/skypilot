@@ -86,7 +86,6 @@ def trainer_config() -> TrainerConfig:
         lora_target_modules=["q_proj", "v_proj"
                             ],  # Modules to target for LoRA fine-tuning
         batch_size=4,  # Added batch size for per-device training
-        device_map="auto",  # Load model on the current device
     )
     return trainer_config
 
@@ -97,6 +96,16 @@ def train(
 ):
     print("Training model...")
     config = trainer_config()
+
+    # Setup distributed training
+    local_rank = int(os.environ.get("LOCAL_RANK", -1))
+    world_size = int(os.environ.get("WORLD_SIZE", 1))
+    is_distributed = world_size > 1
+    
+    if is_distributed:
+        init_process_group(backend="nccl")
+        torch.cuda.set_device(local_rank)
+        print(f"Process {local_rank} using device {torch.cuda.current_device()}")
 
     # load tokenizer
     tokenizer = AutoTokenizer.from_pretrained(
@@ -109,45 +118,41 @@ def train(
 
     if torch.cuda.is_available():
         dtype = torch.bfloat16
-        # local_rank = int(os.environ["LOCAL_RANK"])
-        # torch.cuda.set_device(local_rank)
-        # print(f"Process {local_rank} using device {torch.cuda.current_device()}")
     else:
         dtype = torch.float32
 
-    # init_process_group(backend="nccl", init_method="env://")
-
-    # load pre-trained model
+    # Modify model loading parameters based on distributed setup
     load_model_params = {
         **kwargs,
         "use_auth_token": hf_auth_token,
         "torch_dtype": dtype,
-        "device_map": config.device_map,
     }
+    
+    # Don't use device_map in distributed mode
+    if not is_distributed:
+        load_model_params["device_map"] = "auto"
+
     if config.use_4bit:
-        load_model_params = {
-            **load_model_params,
-            "quantization_config": BitsAndBytesConfig(
-                load_in_4bit=True,
-                llm_int8_threshold=6.0,
-                llm_int8_skip_modules=None,
-                llm_int8_enable_fp32_cpu_offload=True,
-                llm_int8_has_fp16_weight=False,
-                bnb_4bit_use_double_quant=True,
-                bnb_4bit_quant_type="nf4",
-                bnb_4bit_compute_dtype=dtype,
-            ),
-        }
+        load_model_params["quantization_config"] = BitsAndBytesConfig(
+            load_in_4bit=True,
+            llm_int8_threshold=6.0,
+            llm_int8_skip_modules=None,
+            llm_int8_enable_fp32_cpu_offload=True,
+            llm_int8_has_fp16_weight=False,
+            bnb_4bit_use_double_quant=True,
+            bnb_4bit_quant_type="nf4",
+            bnb_4bit_compute_dtype=dtype,
+        )
 
     model = AutoModelForCausalLM.from_pretrained(
         config.model_path,
         **load_model_params,
     )
-    # model = model.to(local_rank)
 
     optim = "adamw_torch"
     if config.use_qlora:
         optim = "paged_adamw_8bit"
+        # Enable gradient checkpointing before DDP wrapping
         model.gradient_checkpointing_enable()
         model = prepare_model_for_kbit_training(model)
 
@@ -164,6 +169,11 @@ def train(
         print("LORA Config:")
         print(lora_config)
         model.print_trainable_parameters()
+
+    # Move model to correct device and wrap with DDP after all other modifications
+    if is_distributed:
+        model = model.to(local_rank)
+        model = DDP(model, device_ids=[local_rank])
 
     def tokenize(examples):
         tokens = tokenizer(
@@ -212,7 +222,7 @@ def train(
         per_device_train_batch_size=config.batch_size,
         per_device_eval_batch_size=config.batch_size,
         gradient_accumulation_steps=config.gradient_accumulation_steps,
-        dataloader_num_workers=0,
+        dataloader_num_workers=4,
         num_train_epochs=config.num_epochs,
         max_steps=config.max_steps,
         logging_steps=1,
@@ -222,9 +232,20 @@ def train(
         save_steps=500,
         save_total_limit=1,
         remove_unused_columns=False,
+        local_rank=local_rank,
+        ddp_backend="nccl",
+        gradient_checkpointing=False,
     )
 
-    trainer = Trainer(
+    # Create a custom subclass of Trainer to prevent automatic gradient checkpointing
+    class CustomTrainer(Trainer):
+        def _wrap_model(self, model, training=True, dataloader=None):
+            # Do not enable gradient checkpointing here
+            if is_distributed:
+                return model
+            return super()._wrap_model(model, training, dataloader)
+
+    trainer = CustomTrainer(
         model=model,
         args=training_args,
         train_dataset=dataset_splits["train"],
