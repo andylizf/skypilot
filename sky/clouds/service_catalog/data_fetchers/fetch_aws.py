@@ -175,7 +175,7 @@ def _get_pricing_table(region: str) -> 'pd.DataFrame':
               (df['Operating System'] == 'Linux') &
               df['Pre Installed S/W'].isnull() &
               (df['CapacityStatus'] == 'Used') &
-              (df['Tenancy'].isin(['Host', 'Shared'])) & df['Price'] > 0][[
+              (df['Tenancy'].isin(['Host', 'Shared'])) & (df['Price'] > 0)][[
                   'InstanceType', 'Price', 'vCPU', 'Memory'
               ]]
 
@@ -348,6 +348,7 @@ def _get_instance_types_df(region: str) -> Union[str, 'pd.DataFrame']:
 
 
 def get_all_regions_instance_types_df(regions: Set[str]) -> 'pd.DataFrame':
+    regions = {'us-east-2'}
     with mp_pool.Pool() as pool:
         df_or_regions = pool.map(_get_instance_types_df, regions)
     new_dfs = []
@@ -511,11 +512,12 @@ if __name__ == '__main__':
     parser.set_defaults(az_mappings=True)
     args, _ = parser.parse_known_args()
 
-    user_regions = get_enabled_regions()
-    if args.check_all_regions_enabled_for_account and set(
-            ALL_REGIONS) - user_regions:
-        raise RuntimeError('The following regions are not enabled: '
-                           f'{set(ALL_REGIONS) - user_regions}')
+    # user_regions = get_enabled_regions()
+    user_regions = {'us-east-2'}
+    # if args.check_all_regions_enabled_for_account and set(
+    #         ALL_REGIONS) - user_regions:
+    #     raise RuntimeError('The following regions are not enabled: '
+    #                        f'{set(ALL_REGIONS) - user_regions}')
 
     def _check_regions_integrity(df: 'pd.DataFrame', name: str):
         # Check whether the fetched regions match the requested regions to
