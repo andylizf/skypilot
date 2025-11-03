@@ -754,6 +754,7 @@ def start(job_id, dag_yaml, pool):
         scheduler.job_done(job_id)
 
 
+# Reference: cant-be-late impl, https://github.com/skypilot-org/skypilot/commit/d676b50a70f42d27b59eb0d50cdfad0901391d10  # pylint: disable=line-too-long
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--job-id',
