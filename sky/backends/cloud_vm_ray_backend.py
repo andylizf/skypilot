@@ -111,6 +111,7 @@ _NODES_LAUNCHING_PROGRESS_TIMEOUT = {
     clouds.IBM: 160,
     clouds.OCI: 300,
     clouds.Paperspace: 600,
+    clouds.Trace: 600,
     clouds.Kubernetes: 300,
     clouds.Vsphere: 240,
 }
@@ -217,7 +218,8 @@ def _get_cluster_config_template(cloud):
         clouds.Vast: 'vast-ray.yml.j2',
         clouds.Fluidstack: 'fluidstack-ray.yml.j2',
         clouds.Nebius: 'nebius-ray.yml.j2',
-        clouds.Hyperbolic: 'hyperbolic-ray.yml.j2'
+        clouds.Hyperbolic: 'hyperbolic-ray.yml.j2',
+        clouds.Trace: 'runpod-ray.yml.j2',
     }
     return cloud_to_template[type(cloud)]
 
@@ -3347,53 +3349,54 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         usage_lib.messages.usage.update_final_cluster_status(
             status_lib.ClusterStatus.UP)
 
-        # Update job queue to avoid stale jobs (when restarted), before
-        # setting the cluster to be ready.
-        if prev_cluster_status == status_lib.ClusterStatus.INIT:
-            # update_status will query the ray job status for all INIT /
-            # PENDING / RUNNING jobs for the real status, since we do not
-            # know the actual previous status of the cluster.
-            cmd = job_lib.JobLibCodeGen.update_status()
-            logger.debug('Update job queue on remote cluster.')
-            with rich_utils.safe_status(
-                    ux_utils.spinner_message('Preparing SkyPilot runtime')):
-                returncode, _, stderr = self.run_on_head(handle,
-                                                         cmd,
-                                                         require_outputs=True)
-            subprocess_utils.handle_returncode(returncode, cmd,
-                                               'Failed to update job status.',
-                                               stderr)
-        if prev_cluster_status == status_lib.ClusterStatus.STOPPED:
-            # Safely set all the previous jobs to FAILED since the cluster
-            # is restarted
-            # An edge case here due to racing:
-            # 1. A job finishes RUNNING, but right before it update itself
-            # to SUCCEEDED, the cluster is STOPPED by `sky stop`.
-            # 2. On next `sky start`, it gets reset to FAILED.
-            cmd = job_lib.JobLibCodeGen.fail_all_jobs_in_progress()
-            returncode, stdout, stderr = self.run_on_head(handle,
-                                                          cmd,
-                                                          require_outputs=True)
-            subprocess_utils.handle_returncode(
-                returncode, cmd,
-                'Failed to set previously in-progress jobs to FAILED',
-                stdout + stderr)
-
-        prev_ports = None
-        if prev_handle is not None:
-            prev_ports = prev_handle.launched_resources.ports
-        current_ports = handle.launched_resources.ports
-        open_new_ports = bool(
-            resources_utils.port_ranges_to_set(current_ports) -
-            resources_utils.port_ranges_to_set(prev_ports))
-        if open_new_ports:
-            launched_resources = handle.launched_resources.assert_launchable()
-            if not (launched_resources.cloud.OPEN_PORTS_VERSION <=
-                    clouds.OpenPortsVersion.LAUNCH_ONLY):
+        if handle.launched_resources.cloud.canonical_name().lower() != 'trace':
+            # Update job queue to avoid stale jobs (when restarted), before
+            # setting the cluster to be ready.
+            if prev_cluster_status == status_lib.ClusterStatus.INIT:
+                # update_status will query the ray job status for all INIT /
+                # PENDING / RUNNING jobs for the real status, since we do not
+                # know the actual previous status of the cluster.
+                cmd = job_lib.JobLibCodeGen.update_status()
+                logger.debug('Update job queue on remote cluster.')
                 with rich_utils.safe_status(
-                        ux_utils.spinner_message(
-                            'Launching - Opening new ports')):
-                    self._open_ports(handle)
+                        ux_utils.spinner_message('Preparing SkyPilot runtime')):
+                    returncode, _, stderr = self.run_on_head(handle,
+                                                            cmd,
+                                                            require_outputs=True)
+                subprocess_utils.handle_returncode(returncode, cmd,
+                                                'Failed to update job status.',
+                                                stderr)
+            if prev_cluster_status == status_lib.ClusterStatus.STOPPED:
+                # Safely set all the previous jobs to FAILED since the cluster
+                # is restarted
+                # An edge case here due to racing:
+                # 1. A job finishes RUNNING, but right before it update itself
+                # to SUCCEEDED, the cluster is STOPPED by `sky stop`.
+                # 2. On next `sky start`, it gets reset to FAILED.
+                cmd = job_lib.JobLibCodeGen.fail_all_jobs_in_progress()
+                returncode, stdout, stderr = self.run_on_head(handle,
+                                                            cmd,
+                                                            require_outputs=True)
+                subprocess_utils.handle_returncode(
+                    returncode, cmd,
+                    'Failed to set previously in-progress jobs to FAILED',
+                    stdout + stderr)
+
+            prev_ports = None
+            if prev_handle is not None:
+                prev_ports = prev_handle.launched_resources.ports
+            current_ports = handle.launched_resources.ports
+            open_new_ports = bool(
+                resources_utils.port_ranges_to_set(current_ports) -
+                resources_utils.port_ranges_to_set(prev_ports))
+            if open_new_ports:
+                launched_resources = handle.launched_resources.assert_launchable()
+                if not (launched_resources.cloud.OPEN_PORTS_VERSION <=
+                        clouds.OpenPortsVersion.LAUNCH_ONLY):
+                    with rich_utils.safe_status(
+                            ux_utils.spinner_message(
+                                'Launching - Opening new ports')):
+                        self._open_ports(handle)
 
         # Capture task YAML and command
         user_specified_task_config = None
@@ -4533,21 +4536,22 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             # Stop the ray autoscaler first to avoid the head node trying to
             # re-launch the worker nodes, during the termination of the
             # cluster.
-            try:
-                # We do not check the return code, since Ray returns
-                # non-zero return code when calling Ray stop,
-                # even when the command was executed successfully.
-                self.run_on_head(handle,
-                                 f'{constants.SKY_RAY_CMD} stop --force')
-            except exceptions.FetchClusterInfoError:
-                # This error is expected if the previous cluster IP is
-                # failed to be found,
-                # i.e., the cluster is already stopped/terminated.
-                if prev_cluster_status == status_lib.ClusterStatus.UP:
-                    logger.warning(
-                        'Failed to take down Ray autoscaler on the head node. '
-                        'It might be because the cluster\'s head node has '
-                        'already been terminated. It is fine to skip this.')
+            if cloud.canonical_name().lower() != 'trace':
+                try:
+                    # We do not check the return code, since Ray returns
+                    # non-zero return code when calling Ray stop,
+                    # even when the command was executed successfully.
+                    self.run_on_head(handle,
+                                    f'{constants.SKY_RAY_CMD} stop --force')
+                except exceptions.FetchClusterInfoError:
+                    # This error is expected if the previous cluster IP is
+                    # failed to be found,
+                    # i.e., the cluster is already stopped/terminated.
+                    if prev_cluster_status == status_lib.ClusterStatus.UP:
+                        logger.warning(
+                            'Failed to take down Ray autoscaler on the head node. '
+                            'It might be because the cluster\'s head node has '
+                            'already been terminated. It is fine to skip this.')
 
             try:
                 provisioner.teardown_cluster(repr(cloud),
@@ -4834,7 +4838,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
 
         # If cluster_yaml is None, the cluster should ensured to be terminated,
         # so we don't need to do the double check.
-        if handle.cluster_yaml is not None:
+        if (handle.cluster_yaml is not None and
+            handle.launched_resources.cloud.canonical_name().lower() != 'trace'):
             try:
                 _detect_abnormal_non_terminated_nodes(handle)
             except exceptions.ClusterStatusFetchingError as e:

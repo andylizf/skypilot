@@ -31,6 +31,7 @@ from sky.clouds.scp import SCP
 from sky.clouds.ssh import SSH
 from sky.clouds.vast import Vast
 from sky.clouds.vsphere import Vsphere
+from sky.clouds.trace import Trace
 
 __all__ = [
     'IBM',
@@ -58,6 +59,7 @@ __all__ = [
     'Fluidstack',
     'Nebius',
     'Hyperbolic',
+    'Trace',
     # Utility functions
     'cloud_in_iterable',
 ]

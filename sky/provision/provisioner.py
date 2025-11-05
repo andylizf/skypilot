@@ -438,6 +438,8 @@ def _post_provision_setup(
                                               provision_record.region,
                                               cluster_name.name_on_cloud,
                                               provider_config=provider_config)
+    if cloud_name.lower() == 'trace':
+        return cluster_info
 
     if cluster_info.num_instances > 1:
         # Only worker nodes have logs in the per-instance log directory. Head
