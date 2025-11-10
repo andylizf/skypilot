@@ -24,7 +24,7 @@ def run_instances(region: str, cluster_name_on_cloud: str,
     """Runs instances for the given cluster."""
     with open(TRACE_CLOUD_RECORD_FILE, 'r') as f:
         d = json.load(f)
-    if d[CURRENT_TICK_KEY] >= 10:
+    if d[CURRENT_TICK_KEY] >= 10 and config.node_config['Preemptible']:
         raise ValueError('NoCapacityError')
     if cluster_name_on_cloud not in d:
         d[cluster_name_on_cloud] = {
