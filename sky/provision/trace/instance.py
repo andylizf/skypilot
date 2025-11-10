@@ -7,7 +7,7 @@ from sky import sky_logging
 from sky.provision import common
 from sky.utils import status_lib
 
-TRACE_CLOUD_RECORD_FILE = '@temp/trace.json'
+TRACE_CLOUD_RECORD_FILE = os.path.expanduser('~/trace.json')
 CURRENT_TICK_KEY = 'current-tick'
 if not os.path.exists(TRACE_CLOUD_RECORD_FILE):
     with open(TRACE_CLOUD_RECORD_FILE, 'w') as f:

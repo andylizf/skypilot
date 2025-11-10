@@ -2435,6 +2435,8 @@ def refresh_cluster_record(
     record = global_user_state.get_cluster_from_name(cluster_name)
     if record is None:
         return None
+    if (record['handle'].launched_resources.cloud.canonical_name().lower() == 'trace'):
+        return record
     # TODO(zhwu, 05/20): switch to the specific workspace to make sure we are
     # using the correct cloud credentials.
     workspace = record.get('workspace', constants.SKYPILOT_DEFAULT_WORKSPACE)
