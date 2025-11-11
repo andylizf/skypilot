@@ -2005,6 +2005,74 @@ def stream_and_get(
     return stream_response(request_id, response, output_stream)
 
 
+def stream_response_until_output_contains(request_id: Optional[server_common.RequestId[T]],
+                    response: 'requests.Response',
+                    output_stream: Optional['io.TextIOBase'] = None,
+                    resumable: bool = False,
+                    contains: Optional[str] = None) -> Optional[T]:
+    retry_context: Optional[rest.RetryContext] = None
+    if resumable:
+        retry_context = rest.get_retry_context()
+    try:
+        line_count = 0
+        for line in rich_utils.decode_rich_status(response):
+            if line is not None:
+                line_count += 1
+                if retry_context is None:
+                    print(line, flush=True, end='', file=output_stream)
+                elif line_count > retry_context.line_processed:
+                    print(line, flush=True, end='', file=output_stream)
+                    retry_context.line_processed = line_count
+                if contains is not None and contains in line:
+                    return None
+        if request_id is not None:
+            return get(request_id)
+        else:
+            return None
+    except Exception:  # pylint: disable=broad-except
+        logger.debug(f'To stream request logs: sky api logs {request_id}')
+        raise
+
+
+@usage_lib.entrypoint
+@server_common.check_server_healthy_or_start
+@annotations.client_api
+def stream_until_output_contains(
+    request_id: Optional[server_common.RequestId[T]] = None,
+    log_path: Optional[str] = None,
+    tail: Optional[int] = None,
+    follow: bool = True,
+    output_stream: Optional['io.TextIOBase'] = None,
+    contains: Optional[str] = None,
+) -> Optional[T]:
+    params = {
+        'request_id': request_id,
+        'log_path': log_path,
+        'tail': str(tail) if tail is not None else None,
+        'follow': follow,
+        'format': 'console',
+    }
+    response = server_common.make_authenticated_request(
+        'GET',
+        '/api/stream',
+        params=params,
+        retry=False,
+        timeout=(client_common.API_SERVER_REQUEST_CONNECTION_TIMEOUT_SECONDS,
+                 None),
+        stream=True)
+    if response.status_code in [404, 400]:
+        detail = response.json().get('detail')
+        with ux_utils.print_exception_no_traceback():
+            raise RuntimeError(f'Failed to stream logs: {detail}')
+    elif response.status_code != 200:
+        # TODO(syang): handle the case where the requestID is not provided
+        # see https://github.com/skypilot-org/skypilot/issues/6549
+        if request_id is None:
+            return None
+        return get(request_id)
+    return stream_response_until_output_contains(
+        request_id, response, output_stream, contains=contains)
+
 @usage_lib.entrypoint
 @annotations.client_api
 def api_cancel(request_ids: Optional[Union[server_common.RequestId[T],
