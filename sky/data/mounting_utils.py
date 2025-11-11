@@ -382,7 +382,8 @@ def get_mount_cached_cmd(rclone_config: str, rclone_profile_name: str,
         # This is to prevent cache from growing too large and
         # using up all the disk space. Note that files that opened
         # by a process is not evicted from the cache.
-        '--vfs-cache-max-size 10G '
+        '--vfs-cache-max-size 1000G '
+        '--vfs-read-ahead 1000G '
         # give each mount its own cache directory
         f'--cache-dir {constants.RCLONE_CACHE_DIR}/{hashed_mount_path} '
         # This command produces children processes, which need to be
