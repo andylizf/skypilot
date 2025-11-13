@@ -337,7 +337,17 @@ def get_cos_mount_cmd(rclone_config: str,
 
 def get_mount_cached_cmd(rclone_config: str, rclone_profile_name: str,
                          bucket_name: str, mount_path: str) -> str:
-    """Returns a command to mount a bucket using rclone with vfs cache."""
+    """Returns a command to mount a bucket using rclone with vfs cache.
+
+    Behavior changes (NVMe-aware cache base):
+    - If env SKYPILOT_RCLONE_CACHE_DIR is set on the remote, use it.
+    - Else, if /opt/dlami/nvme exists (AWS DLAMI default NVMe mount), use
+      /opt/dlami/nvme/sky-rclone-cache.
+    - Else, fall back to constants.RCLONE_CACHE_DIR (~/.cache/rclone).
+
+    This keeps the default fast path (NVMe) without requiring users to
+    pre-configure cache directories, while remaining portable.
+    """
     # stores bucket profile in rclone config file at the remote nodes.
     configure_rclone_profile = (f'{FUSERMOUNT3_SOFT_LINK_CMD}; '
                                 f'mkdir -p {constants.RCLONE_CONFIG_DIR} && '
@@ -353,12 +363,33 @@ def get_mount_cached_cmd(rclone_config: str, rclone_profile_name: str,
                                  f'{hashed_mount_path}.log')
     create_log_cmd = (f'mkdir -p {constants.RCLONE_LOG_DIR} && '
                       f'touch {log_file_path}')
+
+    # Resolve cache base on the remote host at runtime:
+    # 1) Use SKYPILOT_RCLONE_CACHE_DIR if provided
+    # 2) Otherwise prefer NVMe on DLAMI hosts
+    # 3) Fallback to ~/.cache/rclone
+    cache_resolve_cmd = (
+        'CACHE_BASE="${SKYPILOT_RCLONE_CACHE_DIR}"; '
+        'if [ -z "$CACHE_BASE" ]; then '
+        '  if [ -d /opt/dlami/nvme ]; then '
+        '    CACHE_BASE=/opt/dlami/nvme/sky-rclone-cache; '
+        '  elif [ -d /mnt/nvme ]; then '
+        '    CACHE_BASE=/mnt/nvme/sky-rclone-cache; '
+        '  elif [ -d /mnt/disks/local-ssd ]; then '
+        '    CACHE_BASE=/mnt/disks/local-ssd/sky-rclone-cache; '
+        '  else '
+        '    CACHE_BASE=~/.cache/rclone; '
+        '  fi; '
+        'fi; '
+        'sudo mkdir -p "$CACHE_BASE" && sudo chmod 777 "$CACHE_BASE"'
+    )
     # when mounting multiple directories with vfs cache mode, it's handled by
     # rclone to create separate cache directories at ~/.cache/rclone/vfs. It is
     # not necessary to specify separate cache directories.
     mount_cmd = (
         f'{create_log_cmd} && '
         f'{configure_rclone_profile} && '
+        f'{cache_resolve_cmd} && '
         'rclone mount '
         f'{rclone_profile_name}:{bucket_name} {mount_path} '
         # '--daemon' keeps the mounting process running in the background.
@@ -384,8 +415,8 @@ def get_mount_cached_cmd(rclone_config: str, rclone_profile_name: str,
         # by a process is not evicted from the cache.
         '--vfs-cache-max-size 1000G '
         '--vfs-read-ahead 1000G '
-        # give each mount its own cache directory
-        f'--cache-dir {constants.RCLONE_CACHE_DIR}/{hashed_mount_path} '
+        # give each mount its own cache directory (resolved above)
+        f'--cache-dir ${{CACHE_BASE}}/{hashed_mount_path} '
         # This command produces children processes, which need to be
         # detached from the current process's terminal. The command doesn't
         # produce any output, so we aren't dropping any logs.
