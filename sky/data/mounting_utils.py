@@ -386,10 +386,22 @@ def get_mount_cached_cmd(rclone_config: str, rclone_profile_name: str,
     # when mounting multiple directories with vfs cache mode, it's handled by
     # rclone to create separate cache directories at ~/.cache/rclone/vfs. It is
     # not necessary to specify separate cache directories.
+    # Resolve upload parallelism (number of concurrent file transfers):
+    # default 1 to preserve previous ordering semantics, but allow override via
+    # SKYPILOT_RCLONE_TRANSFERS for high-throughput workloads (e.g., large
+    # checkpoint shards).
+    transfer_resolve_cmd = (
+        'RCLONE_TRANSFERS="${SKYPILOT_RCLONE_TRANSFERS}"; '
+        'if [ -z "$RCLONE_TRANSFERS" ]; then '
+        '  RCLONE_TRANSFERS=1; '
+        'fi'
+    )
+
     mount_cmd = (
         f'{create_log_cmd} && '
         f'{configure_rclone_profile} && '
         f'{cache_resolve_cmd} && '
+        f'{transfer_resolve_cmd} && '
         'rclone mount '
         f'{rclone_profile_name}:{bucket_name} {mount_path} '
         # '--daemon' keeps the mounting process running in the background.
@@ -402,13 +414,15 @@ def get_mount_cached_cmd(rclone_config: str, rclone_profile_name: str,
         # interval allows for faster detection of new or updated files on the
         # remote, but increases the frequency of metadata lookups.
         '--allow-other --vfs-cache-mode full --dir-cache-time 10s '
-        # '--transfers 1' guarantees the files written at the local mount point
-        # to be uploaded to the backend storage in the order of creation.
+        # '--transfers' controls how many files are uploaded concurrently.
+        # Default is 1 to preserve ordering, but can be overridden via
+        # $SKYPILOT_RCLONE_TRANSFERS for high-throughput workloads.
         # '--vfs-cache-poll-interval' specifies the frequency of how often
         # rclone checks the local mount point for stale objects in cache.
         # '--vfs-write-back' defines the time to write files on remote storage
         # after last use of the file in local mountpoint.
-        '--transfers 1 --vfs-cache-poll-interval 10s --vfs-write-back 1s '
+        '--transfers ${RCLONE_TRANSFERS} '
+        '--vfs-cache-poll-interval 10s --vfs-write-back 1s '
         # Have rclone evict files if the cache size exceeds 10G.
         # This is to prevent cache from growing too large and
         # using up all the disk space. Note that files that opened
